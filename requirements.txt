@@ -1,0 +1,11 @@
+fastmcp>=2.12.0
+httpx>=0.27.2
+uvicorn[standard]>=0.32.0
+python-dotenv>=1.0.0
+crewai[tools]
+nest-asyncio>=1.6.0
+
+# Keycard SDK
+# For production, use:
+# keycardai-oauth @ git+https://github.com/keycardai/python-sdk.git@main#subdirectory=packages/oauth
+# keycardai-mcp @ git+https://github.com/keycardai/python-sdk.git@main#subdirectory=packages/mcp

@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: linear-github-mcp
+    runtime: python
+    buildCommand: pip install uv && uv sync
+    startCommand: uv run uvicorn src.server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: KEYCARD_ZONE_ID
+        sync: false
+      - key: KEYCARD_CLIENT_ID
+        sync: false
+      - key: KEYCARD_CLIENT_SECRET
+        sync: false
+      - key: MCP_SERVER_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+    healthCheckPath: /.well-known/oauth-protected-resource
+    autoDeploy: true
+    region: oregon
