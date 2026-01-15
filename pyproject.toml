@@ -24,6 +24,4 @@ dev-dependencies = [
     "pytest>=8.0.0",
 ]
 
-[tool.uv.sources]
-keycardai-oauth = { path = "../python-sdk/packages/oauth", editable = true }
-keycardai-mcp = { path = "../python-sdk/packages/mcp", editable = true }
+# keycardai-oauth and keycardai-mcp are installed from PyPI automatically
