@@ -547,6 +547,28 @@ async def test_auth(ctx: Context) -> dict:
 # CREATE APP
 # =============================================================================
 
+from starlette.routing import Mount
+from starlette.middleware import Middleware
+from keycardai.mcp.server.routers.metadata import auth_metadata_mount
+from keycardai.mcp.server.middleware import BearerAuthMiddleware
+
 # Create ASGI app with Keycard authentication
+# Mount at /mcp to match Keycard Application/Resource identifier
 mcp_asgi_app = mcp.http_app()
-app = Starlette(routes=auth_provider.get_mcp_router(mcp_asgi_app))
+
+routes = [
+    # OAuth metadata endpoints at /.well-known/
+    auth_metadata_mount(
+        issuer=auth_provider.issuer,
+        enable_multi_zone=False,
+        jwks=auth_provider.jwks
+    ),
+    # MCP server mounted at /mcp
+    Mount(
+        "/mcp",
+        app=mcp_asgi_app,
+        middleware=[Middleware(BearerAuthMiddleware, auth_provider.get_token_verifier())],
+    ),
+]
+
+app = Starlette(routes=routes)
