@@ -11,8 +11,7 @@ dependencies = [
     "crewai>=0.86.0",
     "crewai-tools>=0.17.0",
     "nest-asyncio>=1.6.0",
-    "keycardai-oauth",
-    "keycardai-mcp",
+    "keycardai-mcp-fastmcp",
 ]
 
 [build-system]
@@ -27,4 +26,4 @@ dev = [
     "pytest>=8.0.0",
 ]
 
-# keycardai-oauth and keycardai-mcp are installed from PyPI automatically
+# keycardai-mcp-fastmcp includes both keycardai-oauth and keycardai-mcp as dependencies

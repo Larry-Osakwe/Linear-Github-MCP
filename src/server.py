@@ -5,6 +5,8 @@ This server provides MCP tools for:
 - Linear: Read/write issues, update task status
 - GitHub: Read repo, create branches, write files, create PRs
 - CrewAI: Research tool that analyzes tasks and produces implementation plans
+
+Uses keycardai-mcp-fastmcp for proper FastMCP integration with Keycard OAuth.
 """
 
 from fastmcp import FastMCP, Context
@@ -12,8 +14,9 @@ import httpx
 import os
 import base64
 from dotenv import load_dotenv
-from starlette.applications import Starlette
-from keycardai.mcp.server.auth import AuthProvider
+
+# Keycard FastMCP integration - handles /mcp path correctly
+from keycardai.mcp.integrations.fastmcp import AuthProvider, AccessContext
 from keycardai.mcp.server.auth.application_credentials import ClientSecret
 
 # Load environment variables
@@ -21,7 +24,7 @@ from pathlib import Path
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)
 
-# Create Keycard authentication provider
+# Create Keycard authentication provider using FastMCP integration
 auth_provider = AuthProvider(
     zone_id=os.getenv("KEYCARD_ZONE_ID"),
     mcp_server_name="Linear-GitHub MCP Server",
@@ -32,28 +35,11 @@ auth_provider = AuthProvider(
     ))
 )
 
-# Initialize MCP server
-mcp = FastMCP("Linear-GitHub Automation")
+# Get RemoteAuthProvider for FastMCP - handles /mcp path automatically
+auth = auth_provider.get_remote_auth_provider()
 
-
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
-
-def get_access_context(ctx: Context):
-    """Get Keycard access context from MCP context."""
-    return ctx.get_state("keycardai")
-
-
-def get_token(ctx: Context, resource: str) -> str | None:
-    """Get exchanged token for a resource, or None if not available."""
-    access_ctx = get_access_context(ctx)
-    if access_ctx is None or access_ctx.has_errors():
-        return None
-    try:
-        return access_ctx.access(resource).access_token
-    except Exception:
-        return None
+# Initialize MCP server with Keycard authentication
+mcp = FastMCP("Linear-GitHub Automation", auth=auth)
 
 
 # =============================================================================
@@ -74,11 +60,14 @@ async def echo_tool(ctx: Context, message: str) -> str:
     name="get_linear_issues",
     description="Get Linear issues assigned to the authenticated user. Returns list of issues with id, identifier, title, description, state, and priority."
 )
+@auth_provider.grant("https://api.linear.app")
 async def get_linear_issues(ctx: Context) -> dict:
     """Fetch Linear issues for the authenticated user."""
-    token = get_token(ctx, "https://api.linear.app")
-    if not token:
-        return {"error": "Authentication required for Linear", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
 
     query = """
     query {
@@ -114,11 +103,14 @@ async def get_linear_issues(ctx: Context) -> dict:
     name="get_linear_task",
     description="Get details of a specific Linear task by its identifier (e.g., 'ENG-123')."
 )
+@auth_provider.grant("https://api.linear.app")
 async def get_linear_task(ctx: Context, identifier: str) -> dict:
     """Fetch a specific Linear task by identifier."""
-    token = get_token(ctx, "https://api.linear.app")
-    if not token:
-        return {"error": "Authentication required for Linear", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
 
     query = """
     query($identifier: String!) {
@@ -154,11 +146,14 @@ async def get_linear_task(ctx: Context, identifier: str) -> dict:
     name="get_workflow_states",
     description="Get available workflow states for a Linear team. Useful for knowing which states you can transition a task to."
 )
+@auth_provider.grant("https://api.linear.app")
 async def get_workflow_states(ctx: Context, team_id: str | None = None) -> dict:
     """Get workflow states for transitions."""
-    token = get_token(ctx, "https://api.linear.app")
-    if not token:
-        return {"error": "Authentication required for Linear", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
 
     # If no team_id, get states for all teams the user has access to
     if team_id:
@@ -200,11 +195,14 @@ async def get_workflow_states(ctx: Context, team_id: str | None = None) -> dict:
     name="update_task_status",
     description="Update the status of a Linear task. Requires issue_id and state_id (get state_id from get_workflow_states)."
 )
+@auth_provider.grant("https://api.linear.app")
 async def update_task_status(ctx: Context, issue_id: str, state_id: str) -> dict:
     """Update Linear task status."""
-    token = get_token(ctx, "https://api.linear.app")
-    if not token:
-        return {"error": "Authentication required for Linear", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
 
     mutation = """
     mutation($id: String!, $stateId: String!) {
@@ -235,11 +233,14 @@ async def update_task_status(ctx: Context, issue_id: str, state_id: str) -> dict
     name="get_repo_structure",
     description="Get the file structure of a GitHub repository. Parameters: owner (repo owner), repo (repo name), path (optional subdirectory)."
 )
+@auth_provider.grant("https://api.github.com")
 async def get_repo_structure(ctx: Context, owner: str, repo: str, path: str = "") -> dict:
     """Fetch repository file structure."""
-    token = get_token(ctx, "https://api.github.com")
-    if not token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for GitHub", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.github.com").access_token
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
     headers = {
@@ -268,11 +269,14 @@ async def get_repo_structure(ctx: Context, owner: str, repo: str, path: str = ""
     name="read_file",
     description="Read contents of a file from a GitHub repository. Returns the file content as text."
 )
+@auth_provider.grant("https://api.github.com")
 async def read_file(ctx: Context, owner: str, repo: str, path: str, ref: str = "main") -> dict:
     """Read file contents from GitHub."""
-    token = get_token(ctx, "https://api.github.com")
-    if not token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for GitHub", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.github.com").access_token
 
     url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
     headers = {
@@ -295,11 +299,14 @@ async def read_file(ctx: Context, owner: str, repo: str, path: str, ref: str = "
     name="create_branch",
     description="Create a new branch in a GitHub repository from an existing branch."
 )
+@auth_provider.grant("https://api.github.com")
 async def create_branch(ctx: Context, owner: str, repo: str, branch_name: str, from_branch: str = "main") -> dict:
     """Create a new branch."""
-    token = get_token(ctx, "https://api.github.com")
-    if not token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for GitHub", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.github.com").access_token
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -334,6 +341,7 @@ async def create_branch(ctx: Context, owner: str, repo: str, branch_name: str, f
     name="write_file",
     description="Create or update a file in a GitHub repository. For updates, provide the sha from read_file."
 )
+@auth_provider.grant("https://api.github.com")
 async def write_file(
     ctx: Context,
     owner: str,
@@ -345,9 +353,11 @@ async def write_file(
     sha: str | None = None
 ) -> dict:
     """Create or update a file."""
-    token = get_token(ctx, "https://api.github.com")
-    if not token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for GitHub", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.github.com").access_token
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -386,6 +396,7 @@ async def write_file(
     name="create_pull_request",
     description="Create a pull request in a GitHub repository."
 )
+@auth_provider.grant("https://api.github.com")
 async def create_pull_request(
     ctx: Context,
     owner: str,
@@ -396,9 +407,11 @@ async def create_pull_request(
     base: str = "main"
 ) -> dict:
     """Create a pull request."""
-    token = get_token(ctx, "https://api.github.com")
-    if not token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for GitHub", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.github.com").access_token
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -455,6 +468,7 @@ async def create_pull_request(
     - Step-by-step implementation guide
     """
 )
+@auth_provider.grant(["https://api.linear.app", "https://api.github.com"])
 async def research_task(
     ctx: Context,
     task_identifier: str,
@@ -463,14 +477,18 @@ async def research_task(
     enable_web_search: bool = True
 ) -> dict:
     """Run research crew to analyze task and produce implementation plan."""
-    # Get tokens for both services
-    linear_token = get_token(ctx, "https://api.linear.app")
-    github_token = get_token(ctx, "https://api.github.com")
+    access_ctx: AccessContext = ctx.get_state("keycardai")
 
-    if not linear_token:
-        return {"error": "Authentication required for Linear", "isError": True}
-    if not github_token:
-        return {"error": "Authentication required for GitHub", "isError": True}
+    # Check for errors
+    if access_ctx.has_errors():
+        return {"error": "Authentication required", "details": access_ctx.get_errors(), "isError": True}
+
+    # Get tokens for both services
+    try:
+        linear_token = access_ctx.access("https://api.linear.app").access_token
+        github_token = access_ctx.access("https://api.github.com").access_token
+    except Exception as e:
+        return {"error": f"Failed to get tokens: {str(e)}", "isError": True}
 
     try:
         from .crew.research import run_research_crew_async
@@ -505,9 +523,10 @@ async def research_task(
     name="test_auth",
     description="Test authentication status for Linear and GitHub."
 )
+@auth_provider.grant(["https://api.linear.app", "https://api.github.com"])
 async def test_auth(ctx: Context) -> dict:
     """Test authentication for both services."""
-    access_ctx = get_access_context(ctx)
+    access_ctx: AccessContext = ctx.get_state("keycardai")
 
     if access_ctx is None:
         return {
@@ -544,68 +563,13 @@ async def test_auth(ctx: Context) -> dict:
 
 
 # =============================================================================
-# CREATE APP
+# RUN SERVER
 # =============================================================================
 
-from starlette.routing import Mount, Route
-from starlette.middleware import Middleware
-from starlette.responses import JSONResponse
-from keycardai.mcp.server.middleware import BearerAuthMiddleware
-
-# Create ASGI app with Keycard authentication
-# Mount at /mcp to match Keycard Application/Resource identifier
-mcp_asgi_app = mcp.http_app()
-
-# Custom metadata handler that returns resource URL with /mcp suffix
-def get_protected_resource_metadata(request):
-    """Return OAuth protected resource metadata for the /mcp endpoint."""
-    # Get the base URL from the request, handling proxies
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("host", request.url.netloc)
-    base_url = f"{scheme}://{host}"
-
-    # Always return the /mcp resource URL
-    resource_url = f"{base_url}/mcp"
-
-    metadata = {
-        "resource": resource_url,
-        "authorization_servers": [auth_provider.issuer],
-        "jwks_uri": f"{base_url}/.well-known/jwks.json",
-        "bearer_methods_supported": ["header"],
-        "client_id": resource_url,
-        "client_name": "Linear-GitHub MCP Server",
-        "token_endpoint_auth_method": "private_key_jwt",
-        "grant_types": ["client_credentials"]
-    }
-    return JSONResponse(metadata)
-
-def get_authorization_server_metadata(request):
-    """Proxy the authorization server metadata from Keycard."""
-    import httpx
-    issuer_url = auth_provider.issuer.rstrip('/')
-    with httpx.Client() as client:
-        resp = client.get(f"{issuer_url}/.well-known/oauth-authorization-server")
-        resp.raise_for_status()
-        return JSONResponse(resp.json())
-
-routes = [
-    # OAuth metadata endpoints - explicit routes for /mcp path
-    Mount(
-        "/.well-known",
-        routes=[
-            Route("/oauth-protected-resource", get_protected_resource_metadata),
-            Route("/oauth-protected-resource/mcp", get_protected_resource_metadata),
-            Route("/oauth-authorization-server", get_authorization_server_metadata),
-            Route("/oauth-authorization-server/mcp", get_authorization_server_metadata),
-        ],
-        name="well-known",
-    ),
-    # MCP server mounted at /mcp
-    Mount(
-        "/mcp",
-        app=mcp_asgi_app,
-        middleware=[Middleware(BearerAuthMiddleware, auth_provider.get_token_verifier())],
-    ),
-]
-
-app = Starlette(routes=routes)
+if __name__ == "__main__":
+    # FastMCP handles /mcp path correctly - no 307 redirects
+    mcp.run(
+        transport="streamable-http",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000))
+    )

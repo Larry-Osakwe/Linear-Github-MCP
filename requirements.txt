@@ -5,7 +5,5 @@ python-dotenv>=1.0.0
 crewai[tools]
 nest-asyncio>=1.6.0
 
-# Keycard SDK
-# For production, use:
-# keycardai-oauth @ git+https://github.com/keycardai/python-sdk.git@main#subdirectory=packages/oauth
-# keycardai-mcp @ git+https://github.com/keycardai/python-sdk.git@main#subdirectory=packages/mcp
+# Keycard SDK - FastMCP integration (includes keycardai-oauth and keycardai-mcp)
+keycardai-mcp-fastmcp
