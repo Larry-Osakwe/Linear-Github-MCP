@@ -494,11 +494,12 @@ async def research_task(
         return {"error": "Authentication required", "details": access_ctx.get_errors(), "isError": True}
 
     try:
-        from .crew.research import run_research_crew_async
+        from .crew.research import run_research_crew
 
         # Tool-Secured Mode: Pass ctx and tool functions instead of tokens
         # The crew will call MCP tool functions directly, which use @auth_provider.grant()
-        plan = await run_research_crew_async(
+        # Fully async - no thread pools, proper async context propagation
+        plan = await run_research_crew(
             ctx=ctx,
             task_identifier=task_identifier,
             owner=owner,

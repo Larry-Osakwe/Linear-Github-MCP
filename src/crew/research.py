@@ -1,21 +1,26 @@
 """
-Research crew orchestration using Tool-Secured Mode.
+Research crew orchestration using Tool-Secured Mode with fully async execution.
 
 This module provides the research_task MCP tool that runs a CrewAI crew
 to analyze a Linear task and produce an implementation plan.
 
-Tool-Secured Mode: CrewAI agents call MCP tool function wrappers that
+Tool-Secured Mode: CrewAI agents call async MCP tool function wrappers that
 delegate to the actual MCP tools (which have @auth_provider.grant()).
 Tokens are NEVER exposed to agent code - auth is handled by the decorators.
+
+Key architecture:
+- BaseTool subclasses with async _run() methods
+- crew.kickoff_async() for native async execution
+- No thread pools, no asyncio.run() - proper async context propagation
 """
 
-import asyncio
-from functools import partial
-from typing import Callable, Awaitable, Any
+from typing import Callable, Any
 
 from crewai import Crew, Process
+from crewai.tools import BaseTool
 from crewai_tools import SerperDevTool
 from fastmcp import Context
+from pydantic import Field
 
 from .agents import (
     create_task_analyst,
@@ -31,7 +36,59 @@ from .tasks import (
 )
 
 
-def run_research_crew(
+class LinearTaskTool(BaseTool):
+    """Async tool that calls MCP Linear task function."""
+    name: str = "get_linear_task"
+    description: str = "Get Linear task details by identifier (e.g., 'PLA-5'). Returns task title, description, status, and other metadata."
+
+    ctx: Any = Field(default=None, exclude=True)
+    fn: Any = Field(default=None, exclude=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    async def _run(self, identifier: str) -> str:
+        """Async implementation - CrewAI handles this natively."""
+        result = await self.fn.fn(self.ctx, identifier)
+        return str(result)
+
+
+class RepoStructureTool(BaseTool):
+    """Async tool that calls MCP GitHub repo structure function."""
+    name: str = "get_repo_structure"
+    description: str = "Get GitHub repository file/folder structure. Optionally provide a path for a subdirectory."
+
+    ctx: Any = Field(default=None, exclude=True)
+    fn: Any = Field(default=None, exclude=True)
+    owner: str = Field(default="", exclude=True)
+    repo: str = Field(default="", exclude=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    async def _run(self, path: str = "") -> str:
+        """Async implementation."""
+        result = await self.fn.fn(self.ctx, self.owner, self.repo, path)
+        return str(result)
+
+
+class ReadFileTool(BaseTool):
+    """Async tool that calls MCP GitHub read file function."""
+    name: str = "read_file"
+    description: str = "Read file contents from GitHub repository. Provide the file path relative to repo root."
+
+    ctx: Any = Field(default=None, exclude=True)
+    fn: Any = Field(default=None, exclude=True)
+    owner: str = Field(default="", exclude=True)
+    repo: str = Field(default="", exclude=True)
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    async def _run(self, path: str) -> str:
+        """Async implementation."""
+        result = await self.fn.fn(self.ctx, self.owner, self.repo, path)
+        return str(result)
+
+
+async def run_research_crew(
     ctx: Context,
     task_identifier: str,
     owner: str,
@@ -44,8 +101,11 @@ def run_research_crew(
     """
     Run the research crew to analyze a task and produce an implementation plan.
 
-    Tool-Secured Mode: Agents call MCP tool functions directly.
-    Tokens are handled by @auth_provider.grant() decorators - never exposed to crew.
+    FULLY ASYNC - Tool-Secured Mode:
+    - Agents call async MCP tool functions directly
+    - No thread pools, no asyncio.run() - proper async context propagation
+    - Tokens are handled by @auth_provider.grant() decorators - never exposed to crew
+    - Uses crew.kickoff_async() for native async execution
 
     Args:
         ctx: MCP Context containing AccessContext for authentication
@@ -60,38 +120,14 @@ def run_research_crew(
     Returns:
         Implementation plan as string
     """
-    from crewai.tools import tool
+    # Create async tool instances - these use BaseTool with async _run()
+    linear_tool = LinearTaskTool(ctx=ctx, fn=linear_task_fn)
+    tree_tool = RepoStructureTool(ctx=ctx, fn=github_tree_fn, owner=owner, repo=repo)
+    read_tool = ReadFileTool(ctx=ctx, fn=github_read_fn, owner=owner, repo=repo)
 
-    # Create CrewAI tool wrappers that call MCP functions with auth context
-    # The MCP functions have @auth_provider.grant() - tokens handled automatically
-
-    @tool("get_linear_task")
-    def get_linear_task_tool(identifier: str) -> str:
-        """Get Linear task details by identifier (e.g., 'PLA-5')."""
-        # Call the MCP tool function with auth context
-        # Use .fn to access the underlying callable (FastMCP's @mcp.tool returns FunctionTool)
-        result = asyncio.run(linear_task_fn.fn(ctx, identifier))
-        return str(result)
-
-    @tool("get_repo_structure")
-    def get_repo_structure_tool(path: str = "") -> str:
-        """Get GitHub repository structure. Path is optional subdirectory."""
-        # Call the MCP tool function with auth context
-        # Use .fn to access the underlying callable
-        result = asyncio.run(github_tree_fn.fn(ctx, owner, repo, path))
-        return str(result)
-
-    @tool("read_file")
-    def read_file_tool(path: str) -> str:
-        """Read file contents from GitHub repository."""
-        # Call the MCP tool function with auth context
-        # Use .fn to access the underlying callable
-        result = asyncio.run(github_read_fn.fn(ctx, owner, repo, path))
-        return str(result)
-
-    # Create agents with wrapped tools
-    linear_tools = [get_linear_task_tool]
-    github_tools = [get_repo_structure_tool, read_file_tool]
+    # Create agents with async tools
+    linear_tools = [linear_tool]
+    github_tools = [tree_tool, read_tool]
 
     search_tools = []
     if enable_web_search:
@@ -109,14 +145,12 @@ def run_research_crew(
     # Create tasks
     task_analysis = create_task_analysis_task(task_analyst, task_identifier)
 
-    # We'll run this sequentially and pass context between tasks
+    # Build crew agents list
     crew_agents = [task_analyst, code_analyst, planner]
-    crew_tasks = [task_analysis]
-
     if researcher:
         crew_agents.insert(2, researcher)
 
-    # Create crew
+    # Create and run first crew - USE ASYNC KICKOFF
     crew = Crew(
         agents=crew_agents,
         tasks=[task_analysis],
@@ -124,12 +158,11 @@ def run_research_crew(
         verbose=True
     )
 
-    # Run first task to get analysis
-    result = crew.kickoff()
-
-    # Now create follow-up tasks with context
+    # Native async - no thread pools!
+    result = await crew.kickoff_async()
     task_analysis_output = str(result)
 
+    # Code exploration crew
     code_task = create_code_exploration_task(
         code_analyst,
         owner,
@@ -143,7 +176,7 @@ def run_research_crew(
         process=Process.sequential,
         verbose=True
     )
-    code_result = code_crew.kickoff()
+    code_result = await code_crew.kickoff_async()
     code_context = str(code_result)
 
     # Research task (if enabled)
@@ -156,7 +189,7 @@ def run_research_crew(
             process=Process.sequential,
             verbose=True
         )
-        research_result = research_crew.kickoff()
+        research_result = await research_crew.kickoff_async()
         research_output = str(research_result)
 
     # Final planning task
@@ -173,39 +206,6 @@ def run_research_crew(
         process=Process.sequential,
         verbose=True
     )
-    final_result = planning_crew.kickoff()
+    final_result = await planning_crew.kickoff_async()
 
     return str(final_result)
-
-
-async def run_research_crew_async(
-    ctx: Context,
-    task_identifier: str,
-    owner: str,
-    repo: str,
-    linear_task_fn: Callable,
-    github_tree_fn: Callable,
-    github_read_fn: Callable,
-    enable_web_search: bool = True
-) -> str:
-    """
-    Async wrapper for running research crew.
-
-    Tool-Secured Mode: Pass ctx and tool functions instead of tokens.
-    """
-    # Run in thread pool to not block event loop
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
-        None,
-        partial(
-            run_research_crew,
-            ctx=ctx,
-            task_identifier=task_identifier,
-            owner=owner,
-            repo=repo,
-            linear_task_fn=linear_task_fn,
-            github_tree_fn=github_tree_fn,
-            github_read_fn=github_read_fn,
-            enable_web_search=enable_web_search
-        )
-    )
