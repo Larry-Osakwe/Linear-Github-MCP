@@ -547,21 +547,58 @@ async def test_auth(ctx: Context) -> dict:
 # CREATE APP
 # =============================================================================
 
-from starlette.routing import Mount
+from starlette.routing import Mount, Route
 from starlette.middleware import Middleware
-from keycardai.mcp.server.routers.metadata import auth_metadata_mount
+from starlette.responses import JSONResponse
 from keycardai.mcp.server.middleware import BearerAuthMiddleware
 
 # Create ASGI app with Keycard authentication
 # Mount at /mcp to match Keycard Application/Resource identifier
 mcp_asgi_app = mcp.http_app()
 
+# Custom metadata handler that returns resource URL with /mcp suffix
+def get_protected_resource_metadata(request):
+    """Return OAuth protected resource metadata for the /mcp endpoint."""
+    # Get the base URL from the request, handling proxies
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("host", request.url.netloc)
+    base_url = f"{scheme}://{host}"
+
+    # Always return the /mcp resource URL
+    resource_url = f"{base_url}/mcp"
+
+    metadata = {
+        "resource": resource_url,
+        "authorization_servers": [auth_provider.issuer],
+        "jwks_uri": f"{base_url}/.well-known/jwks.json",
+        "bearer_methods_supported": ["header"],
+        "client_id": resource_url,
+        "client_name": "Linear-GitHub MCP Server",
+        "token_endpoint_auth_method": "private_key_jwt",
+        "grant_types": ["client_credentials"]
+    }
+    return JSONResponse(metadata)
+
+def get_authorization_server_metadata(request):
+    """Proxy the authorization server metadata from Keycard."""
+    import httpx
+    issuer_url = auth_provider.issuer.rstrip('/')
+    with httpx.Client() as client:
+        resp = client.get(f"{issuer_url}/.well-known/oauth-authorization-server")
+        resp.raise_for_status()
+        return JSONResponse(resp.json())
+
 routes = [
-    # OAuth metadata endpoints at /.well-known/
-    auth_metadata_mount(
-        issuer=auth_provider.issuer,
-        enable_multi_zone=False,
-        jwks=auth_provider.jwks
+    # OAuth metadata endpoints - explicit routes for /mcp path
+    Mount(
+        "/.well-known",
+        routes=[
+            Route("/oauth-protected-resource", get_protected_resource_metadata),
+            Route("/oauth-protected-resource/mcp", get_protected_resource_metadata),
+            Route("/oauth-authorization-server", get_authorization_server_metadata),
+            Route("/oauth-authorization-server/mcp", get_authorization_server_metadata),
+        ],
+        name="well-known",
     ),
     # MCP server mounted at /mcp
     Mount(
