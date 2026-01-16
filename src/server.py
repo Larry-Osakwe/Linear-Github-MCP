@@ -52,7 +52,7 @@ async def echo_tool(ctx: Context, message: str) -> str:
 
 
 # Test tool with grant to debug the issue
-@mcp.tool(name="test_grant", description="Test tool with grant decorator")
+@mcp.tool(name="tgrant", description="Test tool with grant decorator")
 @auth_provider.grant("https://api.github.com")
 async def test_grant_tool(ctx: Context) -> dict:
     """Test if grant decorator breaks tool registration."""
@@ -67,7 +67,7 @@ async def test_grant_tool(ctx: Context) -> dict:
 # =============================================================================
 
 @mcp.tool(
-    name="get_linear_issues",
+    name="issues",
     description="Get Linear issues assigned to the authenticated user. Returns list of issues with id, identifier, title, description, state, and priority."
 )
 @auth_provider.grant("https://api.linear.app")
@@ -110,7 +110,7 @@ async def get_linear_issues(ctx: Context) -> dict:
 
 
 @mcp.tool(
-    name="get_linear_task",
+    name="task",
     description="Get details of a specific Linear task by its identifier (e.g., 'ENG-123')."
 )
 @auth_provider.grant("https://api.linear.app")
@@ -153,7 +153,7 @@ async def get_linear_task(ctx: Context, identifier: str) -> dict:
 
 
 @mcp.tool(
-    name="get_workflow_states",
+    name="states",
     description="Get available workflow states for a Linear team. Useful for knowing which states you can transition a task to."
 )
 @auth_provider.grant("https://api.linear.app")
@@ -202,8 +202,8 @@ async def get_workflow_states(ctx: Context, team_id: str | None = None) -> dict:
 
 
 @mcp.tool(
-    name="update_task_status",
-    description="Update the status of a Linear task. Requires issue_id and state_id (get state_id from get_workflow_states)."
+    name="status",
+    description="Update the status of a Linear task. Requires issue_id and state_id (get state_id from states tool)."
 )
 @auth_provider.grant("https://api.linear.app")
 async def update_task_status(ctx: Context, issue_id: str, state_id: str) -> dict:
@@ -240,7 +240,7 @@ async def update_task_status(ctx: Context, issue_id: str, state_id: str) -> dict
 # =============================================================================
 
 @mcp.tool(
-    name="get_repo_structure",
+    name="tree",
     description="Get the file structure of a GitHub repository. Parameters: owner (repo owner), repo (repo name), path (optional subdirectory)."
 )
 @auth_provider.grant("https://api.github.com")
@@ -276,7 +276,7 @@ async def get_repo_structure(ctx: Context, owner: str, repo: str, path: str = ""
 
 
 @mcp.tool(
-    name="read_file",
+    name="read",
     description="Read contents of a file from a GitHub repository. Returns the file content as text."
 )
 @auth_provider.grant("https://api.github.com")
@@ -306,7 +306,7 @@ async def read_file(ctx: Context, owner: str, repo: str, path: str, ref: str = "
 
 
 @mcp.tool(
-    name="create_branch",
+    name="branch",
     description="Create a new branch in a GitHub repository from an existing branch."
 )
 @auth_provider.grant("https://api.github.com")
@@ -348,8 +348,8 @@ async def create_branch(ctx: Context, owner: str, repo: str, branch_name: str, f
 
 
 @mcp.tool(
-    name="write_file",
-    description="Create or update a file in a GitHub repository. For updates, provide the sha from read_file."
+    name="write",
+    description="Create or update a file in a GitHub repository. For updates, provide the sha from read tool."
 )
 @auth_provider.grant("https://api.github.com")
 async def write_file(
@@ -403,7 +403,7 @@ async def write_file(
 
 
 @mcp.tool(
-    name="create_pull_request",
+    name="pr",
     description="Create a pull request in a GitHub repository."
 )
 @auth_provider.grant("https://api.github.com")
@@ -456,7 +456,7 @@ async def create_pull_request(
 # =============================================================================
 
 @mcp.tool(
-    name="research_task",
+    name="research",
     description="""Run a CrewAI research crew to analyze a Linear task and produce a detailed implementation plan.
 
     This tool runs multiple AI agents that:
@@ -530,7 +530,7 @@ async def research_task(
 # =============================================================================
 
 @mcp.tool(
-    name="test_auth",
+    name="auth",
     description="Test authentication status for Linear and GitHub."
 )
 @auth_provider.grant(["https://api.linear.app", "https://api.github.com"])
