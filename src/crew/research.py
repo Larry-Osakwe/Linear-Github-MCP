@@ -69,22 +69,24 @@ def run_research_crew(
     def get_linear_task_tool(identifier: str) -> str:
         """Get Linear task details by identifier (e.g., 'PLA-5')."""
         # Call the MCP tool function with auth context
-        # Use asyncio.run since CrewAI tools are synchronous
-        result = asyncio.run(linear_task_fn(ctx, identifier))
+        # Use .fn to access the underlying callable (FastMCP's @mcp.tool returns FunctionTool)
+        result = asyncio.run(linear_task_fn.fn(ctx, identifier))
         return str(result)
 
     @tool("get_repo_structure")
     def get_repo_structure_tool(path: str = "") -> str:
         """Get GitHub repository structure. Path is optional subdirectory."""
         # Call the MCP tool function with auth context
-        result = asyncio.run(github_tree_fn(ctx, owner, repo, path))
+        # Use .fn to access the underlying callable
+        result = asyncio.run(github_tree_fn.fn(ctx, owner, repo, path))
         return str(result)
 
     @tool("read_file")
     def read_file_tool(path: str) -> str:
         """Read file contents from GitHub repository."""
         # Call the MCP tool function with auth context
-        result = asyncio.run(github_read_fn(ctx, owner, repo, path))
+        # Use .fn to access the underlying callable
+        result = asyncio.run(github_read_fn.fn(ctx, owner, repo, path))
         return str(result)
 
     # Create agents with wrapped tools
