@@ -16,8 +16,7 @@ import base64
 from dotenv import load_dotenv
 
 # Keycard FastMCP integration - handles /mcp path correctly
-from keycardai.mcp.integrations.fastmcp import AuthProvider, AccessContext
-from keycardai.mcp.server.auth.application_credentials import ClientSecret
+from keycardai.mcp.integrations.fastmcp import AuthProvider, AccessContext, ClientSecret
 
 # Load environment variables
 from pathlib import Path
@@ -50,6 +49,17 @@ mcp = FastMCP("Linear-GitHub Automation", auth=auth)
 async def echo_tool(ctx: Context, message: str) -> str:
     """Simple echo for testing connectivity."""
     return f"Echo: {message}"
+
+
+# Test tool with grant to debug the issue
+@mcp.tool(name="test_grant", description="Test tool with grant decorator")
+@auth_provider.grant("https://api.github.com")
+async def test_grant_tool(ctx: Context) -> dict:
+    """Test if grant decorator breaks tool registration."""
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Auth failed", "details": str(access_ctx.get_errors())}
+    return {"status": "grant working", "message": "Tool with @grant decorator loaded successfully"}
 
 
 # =============================================================================
@@ -567,6 +577,29 @@ async def test_auth(ctx: Context) -> dict:
 # =============================================================================
 
 if __name__ == "__main__":
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    # Log registered tools for debugging
+    logger.info("=" * 60)
+    logger.info("Starting Linear-GitHub MCP Server")
+    logger.info("=" * 60)
+
+    # Try to log registered tools
+    try:
+        if hasattr(mcp, '_tool_manager') and hasattr(mcp._tool_manager, '_tools'):
+            tools = mcp._tool_manager._tools
+            logger.info(f"Registered tools ({len(tools)}): {list(tools.keys())}")
+        elif hasattr(mcp, '_tools'):
+            logger.info(f"Registered tools: {list(mcp._tools.keys())}")
+        else:
+            logger.info("Could not access tool registry directly")
+    except Exception as e:
+        logger.warning(f"Could not log tools: {e}")
+
+    logger.info("=" * 60)
+
     # FastMCP handles /mcp path correctly - no 307 redirects
     mcp.run(
         transport="streamable-http",
