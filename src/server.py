@@ -493,22 +493,20 @@ async def research_task(
     if access_ctx.has_errors():
         return {"error": "Authentication required", "details": access_ctx.get_errors(), "isError": True}
 
-    # Get tokens for both services
-    try:
-        linear_token = access_ctx.access("https://api.linear.app").access_token
-        github_token = access_ctx.access("https://api.github.com").access_token
-    except Exception as e:
-        return {"error": f"Failed to get tokens: {str(e)}", "isError": True}
-
     try:
         from .crew.research import run_research_crew_async
 
+        # Tool-Secured Mode: Pass ctx and tool functions instead of tokens
+        # The crew will call MCP tool functions directly, which use @auth_provider.grant()
         plan = await run_research_crew_async(
+            ctx=ctx,
             task_identifier=task_identifier,
             owner=owner,
             repo=repo,
-            linear_token=linear_token,
-            github_token=github_token,
+            # Pass the MCP tool functions so crew can call them with auth context
+            linear_task_fn=get_linear_task,
+            github_tree_fn=get_repo_structure,
+            github_read_fn=read_file,
             enable_web_search=enable_web_search
         )
 

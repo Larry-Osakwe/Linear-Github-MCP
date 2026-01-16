@@ -1,15 +1,21 @@
 """
-Research crew orchestration.
+Research crew orchestration using Tool-Secured Mode.
 
 This module provides the research_task MCP tool that runs a CrewAI crew
 to analyze a Linear task and produce an implementation plan.
+
+Tool-Secured Mode: CrewAI agents call MCP tool function wrappers that
+delegate to the actual MCP tools (which have @auth_provider.grant()).
+Tokens are NEVER exposed to agent code - auth is handled by the decorators.
 """
 
 import asyncio
-from typing import Any
+from functools import partial
+from typing import Callable, Awaitable, Any
 
 from crewai import Crew, Process
 from crewai_tools import SerperDevTool
+from fastmcp import Context
 
 from .agents import (
     create_task_analyst,
@@ -25,134 +31,63 @@ from .tasks import (
 )
 
 
-class LinearTool:
-    """Wrapper to create CrewAI-compatible Linear tools from token."""
-
-    def __init__(self, token: str):
-        self.token = token
-
-    def get_task(self, identifier: str) -> dict:
-        """Synchronous wrapper for Linear API call."""
-        import httpx
-
-        query = """
-        query($identifier: String!) {
-            issue(id: $identifier) {
-                id
-                identifier
-                title
-                description
-                state { id name }
-                priority
-                labels { nodes { name } }
-                assignee { name email }
-                project { name }
-                team { id name }
-                comments { nodes { body user { name } createdAt } }
-            }
-        }
-        """
-
-        response = httpx.post(
-            "https://api.linear.app/graphql",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json"
-            },
-            json={"query": query, "variables": {"identifier": identifier}},
-            timeout=30.0
-        )
-        return response.json()
-
-
-class GitHubTool:
-    """Wrapper to create CrewAI-compatible GitHub tools from token."""
-
-    def __init__(self, token: str):
-        self.token = token
-        self.headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28"
-        }
-
-    def get_structure(self, owner: str, repo: str, path: str = "") -> dict:
-        """Get repository structure."""
-        import httpx
-
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-        response = httpx.get(url, headers=self.headers, timeout=30.0)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list):
-                return {"files": [{"name": f["name"], "type": f["type"], "path": f["path"]} for f in data]}
-            return data
-        return {"error": f"Status {response.status_code}"}
-
-    def read_file(self, owner: str, repo: str, path: str, ref: str = "main") -> dict:
-        """Read file contents."""
-        import httpx
-        import base64
-
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-        response = httpx.get(url, headers=self.headers, params={"ref": ref}, timeout=30.0)
-        if response.status_code == 200:
-            data = response.json()
-            content = base64.b64decode(data.get("content", "")).decode("utf-8")
-            return {"path": path, "content": content}
-        return {"error": f"Status {response.status_code}"}
-
-
 def run_research_crew(
+    ctx: Context,
     task_identifier: str,
     owner: str,
     repo: str,
-    linear_token: str,
-    github_token: str,
+    linear_task_fn: Callable,
+    github_tree_fn: Callable,
+    github_read_fn: Callable,
     enable_web_search: bool = True
 ) -> str:
     """
     Run the research crew to analyze a task and produce an implementation plan.
 
+    Tool-Secured Mode: Agents call MCP tool functions directly.
+    Tokens are handled by @auth_provider.grant() decorators - never exposed to crew.
+
     Args:
+        ctx: MCP Context containing AccessContext for authentication
         task_identifier: Linear task ID (e.g., "ENG-123")
         owner: GitHub repo owner
         repo: GitHub repo name
-        linear_token: OAuth token for Linear API
-        github_token: OAuth token for GitHub API
+        linear_task_fn: MCP tool function for getting Linear tasks
+        github_tree_fn: MCP tool function for getting repo structure
+        github_read_fn: MCP tool function for reading files
         enable_web_search: Whether to enable web search (requires SERPER_API_KEY)
 
     Returns:
         Implementation plan as string
     """
-    # Create tool wrappers with tokens
-    linear_tool = LinearTool(linear_token)
-    github_tool = GitHubTool(github_token)
-
-    # For now, create simple function-based tools
-    # CrewAI can use these directly
-
     from crewai.tools import tool
+
+    # Create CrewAI tool wrappers that call MCP functions with auth context
+    # The MCP functions have @auth_provider.grant() - tokens handled automatically
 
     @tool("get_linear_task")
     def get_linear_task_tool(identifier: str) -> str:
-        """Get Linear task details by identifier (e.g., 'ENG-123')."""
-        result = linear_tool.get_task(identifier)
+        """Get Linear task details by identifier (e.g., 'PLA-5')."""
+        # Call the MCP tool function with auth context
+        # Use asyncio.run since CrewAI tools are synchronous
+        result = asyncio.run(linear_task_fn(ctx, identifier))
         return str(result)
 
     @tool("get_repo_structure")
     def get_repo_structure_tool(path: str = "") -> str:
         """Get GitHub repository structure. Path is optional subdirectory."""
-        result = github_tool.get_structure(owner, repo, path)
+        # Call the MCP tool function with auth context
+        result = asyncio.run(github_tree_fn(ctx, owner, repo, path))
         return str(result)
 
     @tool("read_file")
     def read_file_tool(path: str) -> str:
         """Read file contents from GitHub repository."""
-        result = github_tool.read_file(owner, repo, path)
+        # Call the MCP tool function with auth context
+        result = asyncio.run(github_read_fn(ctx, owner, repo, path))
         return str(result)
 
-    # Create agents with tools
+    # Create agents with wrapped tools
     linear_tools = [get_linear_task_tool]
     github_tools = [get_repo_structure_tool, read_file_tool]
 
@@ -212,10 +147,10 @@ def run_research_crew(
     # Research task (if enabled)
     research_output = "No web research performed."
     if researcher and search_tools:
-        research_task = create_research_task(researcher, task_analysis_output)
+        research_task_obj = create_research_task(researcher, task_analysis_output)
         research_crew = Crew(
             agents=[researcher],
-            tasks=[research_task],
+            tasks=[research_task_obj],
             process=Process.sequential,
             verbose=True
         )
@@ -242,23 +177,33 @@ def run_research_crew(
 
 
 async def run_research_crew_async(
+    ctx: Context,
     task_identifier: str,
     owner: str,
     repo: str,
-    linear_token: str,
-    github_token: str,
+    linear_task_fn: Callable,
+    github_tree_fn: Callable,
+    github_read_fn: Callable,
     enable_web_search: bool = True
 ) -> str:
-    """Async wrapper for running research crew."""
+    """
+    Async wrapper for running research crew.
+
+    Tool-Secured Mode: Pass ctx and tool functions instead of tokens.
+    """
     # Run in thread pool to not block event loop
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
-        run_research_crew,
-        task_identifier,
-        owner,
-        repo,
-        linear_token,
-        github_token,
-        enable_web_search
+        partial(
+            run_research_crew,
+            ctx=ctx,
+            task_identifier=task_identifier,
+            owner=owner,
+            repo=repo,
+            linear_task_fn=linear_task_fn,
+            github_tree_fn=github_tree_fn,
+            github_read_fn=github_read_fn,
+            enable_web_search=enable_web_search
+        )
     )
