@@ -6,15 +6,14 @@ an implementation plan with code context and best practices.
 """
 
 from crewai import Agent, LLM
+import litellm
 
+# Configure LiteLLM to drop unsupported params (e.g., stop, temperature)
+# This prevents errors when using models that don't support certain OpenAI params
+litellm.drop_params = True
 
 # GPT-5 Mini - better and cheaper than GPT-4/4o for most tasks
-# drop_params needed to avoid unsupported parameter errors
-gpt_5_mini = LLM(
-    model="openai/gpt-5-mini",
-    drop_params=True,
-    additional_drop_params=["stop", "temperature"]
-)
+gpt_5_mini = LLM(model="openai/gpt-5-mini")
 
 
 def create_task_analyst(linear_tools: list) -> Agent:
