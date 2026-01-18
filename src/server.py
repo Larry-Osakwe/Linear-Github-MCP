@@ -235,6 +235,139 @@ async def update_task_status(ctx: Context, issue_id: str, state_id: str) -> dict
         return response.json()
 
 
+@mcp.tool(
+    name="create_issue",
+    description="Create a new Linear issue. Requires team_id and title. Optional: description, priority (0=none, 1=urgent, 2=high, 3=medium, 4=low), state_id, assignee_id."
+)
+@auth_provider.grant("https://api.linear.app")
+async def create_linear_issue(
+    ctx: Context,
+    team_id: str,
+    title: str,
+    description: str | None = None,
+    priority: int | None = None,
+    state_id: str | None = None,
+    assignee_id: str | None = None
+) -> dict:
+    """Create a new Linear issue."""
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
+
+    mutation = """
+    mutation($teamId: String!, $title: String!, $description: String, $priority: Int, $stateId: String, $assigneeId: String) {
+        issueCreate(input: {
+            teamId: $teamId
+            title: $title
+            description: $description
+            priority: $priority
+            stateId: $stateId
+            assigneeId: $assigneeId
+        }) {
+            success
+            issue {
+                id
+                identifier
+                title
+                url
+                state { name }
+                assignee { name }
+            }
+        }
+    }
+    """
+
+    variables = {
+        "teamId": team_id,
+        "title": title,
+        "description": description,
+        "priority": priority,
+        "stateId": state_id,
+        "assigneeId": assignee_id
+    }
+    # Remove None values - Linear GraphQL doesn't like null for optional fields
+    variables = {k: v for k, v in variables.items() if v is not None}
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.linear.app/graphql",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json={"query": mutation, "variables": variables}
+        )
+        return response.json()
+
+
+@mcp.tool(
+    name="update_issue",
+    description="Update an existing Linear issue. Requires issue_id. Optional: title, description, priority, state_id, assignee_id."
+)
+@auth_provider.grant("https://api.linear.app")
+async def update_linear_issue(
+    ctx: Context,
+    issue_id: str,
+    title: str | None = None,
+    description: str | None = None,
+    priority: int | None = None,
+    state_id: str | None = None,
+    assignee_id: str | None = None
+) -> dict:
+    """Update an existing Linear issue."""
+    access_ctx: AccessContext = ctx.get_state("keycardai")
+    if access_ctx.has_errors():
+        return {"error": "Authentication required for Linear", "details": access_ctx.get_errors(), "isError": True}
+
+    token = access_ctx.access("https://api.linear.app").access_token
+
+    mutation = """
+    mutation($id: String!, $title: String, $description: String, $priority: Int, $stateId: String, $assigneeId: String) {
+        issueUpdate(id: $id, input: {
+            title: $title
+            description: $description
+            priority: $priority
+            stateId: $stateId
+            assigneeId: $assigneeId
+        }) {
+            success
+            issue {
+                id
+                identifier
+                title
+                url
+                state { name }
+                assignee { name }
+            }
+        }
+    }
+    """
+
+    variables = {
+        "id": issue_id,
+        "title": title,
+        "description": description,
+        "priority": priority,
+        "stateId": state_id,
+        "assigneeId": assignee_id
+    }
+    # Remove None values except id
+    variables = {k: v for k, v in variables.items() if v is not None or k == "id"}
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.linear.app/graphql",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json"
+            },
+            json={"query": mutation, "variables": variables}
+        )
+        return response.json()
+
+
 # =============================================================================
 # GITHUB TOOLS
 # =============================================================================

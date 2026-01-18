@@ -5,7 +5,16 @@ These agents work together to analyze a Linear task and produce
 an implementation plan with code context and best practices.
 """
 
-from crewai import Agent
+from crewai import Agent, LLM
+
+
+# GPT-5 Mini - better and cheaper than GPT-4/4o for most tasks
+# drop_params needed to avoid unsupported parameter errors
+gpt_5_mini = LLM(
+    model="openai/gpt-5-mini",
+    drop_params=True,
+    additional_drop_params=["stop", "temperature"]
+)
 
 
 def create_task_analyst(linear_tools: list) -> Agent:
@@ -18,6 +27,7 @@ def create_task_analyst(linear_tools: list) -> Agent:
         requests and implicit expectations in task descriptions. You always identify
         acceptance criteria, edge cases, and potential blockers.""",
         tools=linear_tools,
+        llm=gpt_5_mini,
         verbose=True,
         allow_delegation=False
     )
@@ -33,6 +43,7 @@ def create_code_analyst(github_tools: list) -> Agent:
         existing patterns, and find code that relates to a given task. You excel at
         providing context about how new code should fit into existing architecture.""",
         tools=github_tools,
+        llm=gpt_5_mini,
         verbose=True,
         allow_delegation=False
     )
@@ -48,6 +59,7 @@ def create_researcher(search_tools: list) -> Agent:
         tutorials, and examples. You can synthesize information from multiple sources
         into actionable recommendations.""",
         tools=search_tools,
+        llm=gpt_5_mini,
         verbose=True,
         allow_delegation=False
     )
@@ -63,6 +75,7 @@ def create_planner() -> Agent:
         step-by-step plan that any developer can follow. You consider edge cases,
         testing requirements, and potential pitfalls.""",
         tools=[],  # No tools - uses context from other agents
+        llm=gpt_5_mini,
         verbose=True,
         allow_delegation=False
     )
