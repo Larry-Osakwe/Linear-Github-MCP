@@ -12,6 +12,7 @@ dependencies = [
     "crewai-tools>=0.17.0",
     "nest-asyncio>=1.6.0",
     "keycardai-mcp-fastmcp",
+    "litellm>=1.50.0",  # For drop_params configuration
 ]
 
 [build-system]
